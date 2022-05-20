@@ -5,13 +5,13 @@ https://www.youtube.com/watch?v=pCq7u2TvlxU
 Also, Cyril Diagne's openFrameworks toolkit:
 https://github.com/cyrildiagne/ofxCvCameraProjectorCalibration
 
-(Re)coded by Harvey Moon, Satoru Higa, Michael Walczyk for 
+(Re)coded by Harvey Moon, Satoru Higa, Michael Walczyk for
 use within Derivative's TouchDesigner software
 
 '''
 import numpy as np
-import cv2 
-aruco = cv2.aruco 
+import cv2
+aruco = cv2.aruco
 
 def intersect_circle_rays_to_board(circles, rvec, t, K, dist_coef):
 	'''
@@ -23,34 +23,34 @@ def intersect_circle_rays_to_board(circles, rvec, t, K, dist_coef):
 		return None
 
 	R, _ = cv2.Rodrigues(rvec)
- 
+
 	# https://stackoverflow.com/questions/5666222/3d-line-plane-intersection
 	plane_normal = R[2,:] # Last row of plane rotation matrix is normal to plane
 	plane_point = t.T     # `t` is a point on the plane
 	epsilon = 1e-06
 	circles_3d = np.zeros((0,3), dtype=np.float32)
- 
+
 	for p in circles_normalized:
 		ray_direction = p / np.linalg.norm(p)
 		ray_point = p
- 
+
 		ndotu = plane_normal.dot(ray_direction.T)
- 
+
 		if abs(ndotu) < epsilon:
 			print('No intersection found (or the line is collinear with the plane)')
- 
+
 		w = ray_point - plane_point
 		si = -plane_normal.dot(w.T) / ndotu
 		psi = w + si * ray_direction + plane_point
 		circles_3d = np.append(circles_3d, psi, axis = 0)
- 
+
 	return circles_3d
 
 def cv_to_gl_projection_matrix(K, w, h, znear=0.1, zfar=1000.0):
 	# Construct an OpenGL-style projection matrix from an OpenCV-style projection
 	# matrix
 	#
-	# References: 
+	# References:
 	# [0] https://strawlab.org/2011/11/05/augmented-reality-with-OpenGL/
 	# [1] https://fruty.io/2019/08/29/augmented-reality-with-opencv-and-opengl-the-tricky-projection-matrix/
 	x0 = 0
@@ -93,17 +93,17 @@ class StereoCalibrate:
 	   gathered in the previous two steps
 
 	Generally speaking, as a user of this class you will:
-	
+
 	1. Call `CaptureFrame()` multiple times (8 or so)
 	2. Call `CalibrateCam()` to get the camera's intrinsic matrix
 	3. Call `CreateUndistortionMap()` to get a UV un-distortion map (texture)
 	4. Call `FindPose()` to find the camera's pose, given any new boards
-	
+
 	'''
 	def __init__(self, COMP_owner):
 		self.COMP_owner = COMP_owner
 		print('Initialized the stereo calibration class')
-		
+
 		# The TOP that we will grab video frames from
 		self.TOP_frame_input = op('null_frame')
 
@@ -116,7 +116,7 @@ class StereoCalibrate:
 		self.Circles_y = 6
 
 		# This will be set whenever the first camera frame is captured
-		self.Camera_resolution = (1280, 720) 
+		self.Camera_resolution = (1280, 720)
 
 		# The minimum number of captured board images required before we can calibrate the camera
 		self.Minimum_boards_required = 8
@@ -127,7 +127,7 @@ class StereoCalibrate:
 
 	def SaveBoard(self, w=2000, h=1300, file_name='charuco_board'):
 		'''
-		This function will save a local .jpg copy of the requested Arcuo board. 
+		This function will save a local .jpg copy of the requested Arcuo board.
 		If you have not printed one out already, you will need to do so.
 
 		'''
@@ -147,45 +147,47 @@ class StereoCalibrate:
 
 	def GrabTop(self, needs_grayscale_conversion=False):
 		'''
-		Grab a frame from a TOP within the network and return a grayscale CV Mat output. 
+		Grab a frame from a TOP within the network and return a grayscale CV Mat output.
 
 		'''
 		# Convert input frame to a numpy array from 0-255
 		pixels = self.TOP_frame_input.numpyArray()[:, :, :3] * 255.0
-		
+
 		# Convert the pixel data to a CV Mat object
 		cv_img = pixels.astype(np.uint8)
-		
+
 		# Need to flip Y because of how TouchDesigner stores pixel data
 		cv_img = cv2.flip(cv_img, 0)
-		
+
 		# Convert to grayscape (if Mono TOP isn't in the network?)
 		if needs_grayscale_conversion:
 			cv_img = cv2.cvtColor(cv_img, cv2.COLOR_RGB2GRAY)
 
-		# Set the camera resolution
+		print('Set the camera resolution')
 		self.Camera_resolution = cv_img.shape[:2]
-
+		# JC I don't know why but seems to come in heightxwidth
+		self.Camera_resolution = (self.Camera_resolution[1],self.Camera_resolution[0])
+		print(self.Camera_resolution)
 		return cv_img
 
 	def CaptureFrame(self):
 		'''
 		Attempts to find the charuco board pattern in the current camera frame - if found,
 		the resulting chessboard corners and IDs are saved into storage for calibration.
-		
+
 		'''
 		print('Capturing camera frame...')
 
-		# Fetch lists 
-		corners_list = parent().fetch('chessboard_corners_accum', []) 
+		# Fetch lists
+		corners_list = parent().fetch('chessboard_corners_accum', [])
 		ids_list = parent().fetch('chessboard_ids_accum', [])
 
 		# Find the aruco corners (markers and chessboard)
 		found, corners, ids, chessboard_corners, chessboard_ids, frame = parent().FindGrids()
-		
+
 		if found:
 			# Accumulate
-			corners_list += [chessboard_corners]				
+			corners_list += [chessboard_corners]
 			ids_list += [chessboard_ids]
 
 			# Set the custom par that shows the user how many views have been captured
@@ -199,11 +201,11 @@ class StereoCalibrate:
 	def FindGrids(self, frame=None):
 		'''
 		A charuco board consists of feducial markers overlaid on top of a chessboard
-		grid. Per the OpenCV docs, the benefit of using these patterns is that they 
+		grid. Per the OpenCV docs, the benefit of using these patterns is that they
 		provide the versatility of aruco boards + the precision of chessboards.
 
 		This function finds such a grid in the input frame and returns 3 items:
-		
+
 		0. The status (whether or not any markers were actually detected)
 		1. The detected marker corners
 		2. The IDs of the marker corners that were found
@@ -213,11 +215,11 @@ class StereoCalibrate:
 
 		'''
 		print('Finding charuco board...')
-	
-		# If a frame was not supplied, grab one from the TOP 
+
+		# If a frame was not supplied, grab one from the TOP
 		if frame is None:
 			frame = parent().GrabTop()
-		
+
 		DAT_ids = op('base_draw_found_grid/geo_aruco_view/table_ids')
 		DAT_ids.clear(keepFirstRow = True)
 		DAT_quads = op('base_draw_found_grid/geo_aruco_view/table_quads')
@@ -229,21 +231,21 @@ class StereoCalibrate:
 		# 1. corners: a vector of detected marker corners (for each marker,
 		#    its four corners are provided)
 		# 2. ids: a vector of identifiers of the detected markers (ints)
-		# 3. rejected image points: the image points of those squares whose 
+		# 3. rejected image points: the image points of those squares whose
 		#    inner code doesn't have a correct codification
 		marker_corners, marker_ids, rejected_img_pts = aruco.detectMarkers(frame, self.Aruco_dictionary)
 		aruco.drawDetectedMarkers(frame, marker_corners, marker_ids, (0, 255, 0))
-		
-		# Next, refine the markers that weren't detected in the previous step based 
+
+		# Next, refine the markers that weren't detected in the previous step based
 		# on the already detected markers and the known board layout
-		# 
+		#
 		# NOTE: you can optionally supply a camera matrix and distortion coefficients
 		# to this function, which may help improve accuracy?
-		marker_corners, marker_ids, rejected, recovered = cv2.aruco.refineDetectedMarkers(frame, self.Aruco_board, marker_corners, marker_ids, rejected_img_pts)  
+		marker_corners, marker_ids, rejected, recovered = cv2.aruco.refineDetectedMarkers(frame, self.Aruco_board, marker_corners, marker_ids, rejected_img_pts)
 		print('\t{} marker corners found (after refinement)'.format(len(marker_corners)))
 
 		# Maybe save the results to disk, if needed
-		save_to_disk = False 
+		save_to_disk = False
 		if save_to_disk:
 			file_name = project.folder + '/find_grids_output.jpg'
 			cv2.imwrite(file_name, frame)
@@ -270,23 +272,23 @@ class StereoCalibrate:
 		# Finally, find the chessboard corners based on the information gathered above
 		if marker_corners == None or len(marker_corners) == 0:
 			print('\tNo marker corners were detected - exiting')
-			return False, [], [], [], [], frame 
+			return False, [], [], [], [], frame
 
 		else:
 			# Find the position of the chessboard corners based on the (now known)
 			# marker positions using a local homography (you can optionally provide
 			# a camera matrix if it is known)
 			ret, chessboard_corners, chessboard_ids = cv2.aruco.interpolateCornersCharuco(marker_corners, marker_ids, frame, self.Aruco_board)
-			
+
 			if len(chessboard_corners) == 0:
 				print('\tNo chessboard corners were found (after interpolation) - exiting')
-				return False, [], [], [], [], frame 
+				return False, [], [], [], [], frame
 
-			else: 
-				# Otherwise, some corners were found 
+			else:
+				# Otherwise, some corners were found
 				for corner in chessboard_corners:
 					DAT_corners.appendRow(corner[0])
-				
+
 				print('\t{} chessboard corners found (after interpolation)'.format(len(chessboard_corners)))
 
 				return True, marker_corners, marker_ids, chessboard_corners, chessboard_ids, frame
@@ -295,22 +297,22 @@ class StereoCalibrate:
 		'''
 		Based on the captured charuco boards, calculate the camera's intrinsic
 		matrix and distortion coefficients.
-		
+
 		'''
 		print('Calibrating the camera...')
-		corners_list = parent().fetch('chessboard_corners_accum', []) 
+		corners_list = parent().fetch('chessboard_corners_accum', [])
 		ids_list = parent().fetch('chessboard_ids_accum', [])
 
 		if not corners_list or not ids_list:
 			print('No corner points have been saved: these are necessary to calibrate the camera - exiting')
-			return 
+			return
 
 		if len(ids_list) < self.Minimum_boards_required:
 			print('Need more boards before calibration - exiting')
-			return 
+			return
 
 		# Calibrate the camera using the data we have gathered thus far
-		# 
+		#
 		# You can optionally set `flags=cv2.CALIB_USE_INTRINSIC_GUESS` and pass a camera matrix
 		#
 		# This function will return:
@@ -319,18 +321,18 @@ class StereoCalibrate:
 		# 3. The camera distortion coefficients
 		# 4. The rotation vector (axis+angle) of each of the poses that was used
 		# 5. The translation vector of each of the poses that was used
-		ret, K, dist_coeff, rvecs, tvecs = cv2.aruco.calibrateCameraCharuco(corners_list, 
+		ret, K, dist_coeff, rvecs, tvecs = cv2.aruco.calibrateCameraCharuco(corners_list,
 																		    ids_list, self.Aruco_board,
 																		    (self.Camera_resolution[0], self.Camera_resolution[1]),
-																		    None, 
-																		    None) 
-		parent().store('camera_intrinsics', {	
+																		    None,
+																		    None)
+		parent().store('camera_intrinsics', {
 				'ret': ret,
 				'K': K,
 				'dist_coeff': dist_coeff,
 				'rvecs': rvecs,
 				'tvecs': tvecs
-		})	
+		})
 
 		# Export .npy
 		np.save(file_name_intrinsics, K)
@@ -346,12 +348,13 @@ class StereoCalibrate:
 
 	def CreateUndistortionMap(self, file_name_undistortion_map='undistortion_map'):
 		'''
-		Creates a UV map that can be used in combination with a Remap TOP to 
+		Creates a UV map that can be used in combination with a Remap TOP to
 		undistort subsequent camera images.
 
 		NOTE: This function requires a calibrated camera.
 
 		'''
+		print('CreateUndistortionMap...')
 		TOP_uv = op('glsl_generate_uv_map')
 		pixels = TOP_uv.numpyArray()[:, :, :3]
 		cv_img = pixels.astype(np.float32)
@@ -361,45 +364,48 @@ class StereoCalibrate:
 		h, w = cv_img.shape[:2]
 
 		if (w, h) != self.Camera_resolution:
-			raise Exception('Attempting to create an undistortion map with different resolution than camera - exiting') 
+			print(w)
+			print(h)
+			print(self.Camera_resolution)
+			raise Exception('Attempting to create an undistortion map with different resolution than camera - exiting')
 
-	
-		# Compute the optimal new camera matrix based on the free scaling parameter, alpha - 
+
+		# Compute the optimal new camera matrix based on the free scaling parameter, alpha -
 		# note that if alpha = 0, the image will be cropped
 		alpha = 0
 		camera_intrinsics = parent().fetch('camera_intrinsics', None)
 		if not camera_intrinsics:
 			raise Exception('Creating an undistortion map requires a calibrated camera - exiting')
-			
-		K_optimal, valid_pixels_ROI = cv2.getOptimalNewCameraMatrix(camera_intrinsics['K'], 
-																    camera_intrinsics['dist_coeff'], 
-																    (w, h), 
-																    alpha, 
+
+		K_optimal, valid_pixels_ROI = cv2.getOptimalNewCameraMatrix(camera_intrinsics['K'],
+																    camera_intrinsics['dist_coeff'],
+																    (w, h),
+																    alpha,
 																    (w, h))
 
 		# Compute the undistortion and rectification transformation map
-		mapx, mapy = cv2.initUndistortRectifyMap(camera_intrinsics['K'], 
-												 camera_intrinsics['dist_coeff'], 
-												 None, 
-												 K_optimal, 
-												 (w, h), 
+		mapx, mapy = cv2.initUndistortRectifyMap(camera_intrinsics['K'],
+												 camera_intrinsics['dist_coeff'],
+												 None,
+												 K_optimal,
+												 (w, h),
 												 cv2.CV_32FC1)
-		
+
 		# Remap and (optionally) crop the image
 		x, y, w, h = valid_pixels_ROI
 		remapped = cv2.remap(cv_img, mapx, mapy, cv2.INTER_LINEAR)
 		remapped = remapped[y : y + h, x : x + w, :]
-		
+
 		# Save out the file
 		cv2.imwrite('{}.exr'.format(file_name_undistortion_map), remapped)
-		
-		# Update storage 
+
+		# Update storage
 		camera_intrinsics['K_optimal'] = K_optimal
 		parent().store('camera_intrinsics', camera_intrinsics)
 
-	def FindPose(self, frame=None, file_name_pose=None):  
-		''' 
-		Find the camera pose based on the charuco pattern detected in the current frame. 
+	def FindPose(self, frame=None, file_name_pose=None):
+		'''
+		Find the camera pose based on the charuco pattern detected in the current frame.
 
 		NOTE: This function requires a calibrated camera.
 
@@ -419,22 +425,22 @@ class StereoCalibrate:
 		found, marker_corners, marker_ids, _, _, frame = self.FindGrids(frame)
 		if not found:
 			print('No board was found - cannot find pose')
-			return 
+			return
 
 		# Then, estimate the board pose
-		ret, rvec, tvec = aruco.estimatePoseBoard(marker_corners, 
-											      marker_ids, 
-											      self.Aruco_board, 
-											      camera_intrinsics['K'], 
-											      camera_intrinsics['dist_coeff'], 
-											      None, # rvec initial guess: optional 
+		ret, rvec, tvec = aruco.estimatePoseBoard(marker_corners,
+											      marker_ids,
+											      self.Aruco_board,
+											      camera_intrinsics['K'],
+											      camera_intrinsics['dist_coeff'],
+											      None, # rvec initial guess: optional
 											      None) # tvec initial guess: optional
 
 		# Convert the axis+angle formulation into a 3x3 rotation matrix (the Jacobian is optional
 		# and not really used here)
 		rotation_matrix, jacobian = cv2.Rodrigues(rvec)
 
-		# A 4x4 transformation matrix that transforms points from the board coordinate system 
+		# A 4x4 transformation matrix that transforms points from the board coordinate system
 		# to the camera coordinate system
 		#
 		# Reference: https://stackoverflow.com/questions/52833322/using-aruco-to-estimate-the-world-position-of-camera
@@ -445,11 +451,11 @@ class StereoCalibrate:
 
 		# Invert the matrix above: this is the extrinsic matrix of the camera, i.e. the camera's
 		# pose in a coordinate system relative to the board's origin
-		camera_to_board = board_to_camera.I  
+		camera_to_board = board_to_camera.I
 
 		# Get the position of the camera, in world space (this should be the same as -tvec): the last column
-		camera_position = [camera_to_board[0, 3], 
-						   camera_to_board[1, 3], 
+		camera_position = [camera_to_board[0, 3],
+						   camera_to_board[1, 3],
 						   camera_to_board[2, 3]]
 		print('\tCamera position (in meters):', camera_position)
 		print('\tCamera extrinsic matrix (pose):\n', camera_to_board)
@@ -466,13 +472,13 @@ class StereoCalibrate:
 		if file_name_pose:
 			aruco_marker_length_meters = 0.032
 
-			frame = aruco.drawAxis(frame, 
-								   camera_intrinsics['K'], 
-								   camera_intrinsics['dist_coeff'], 
-								   rvec, 
-								   tvec, 
+			frame = aruco.drawAxis(frame,
+								   camera_intrinsics['K'],
+								   camera_intrinsics['dist_coeff'],
+								   rvec,
+								   tvec,
 								   aruco_marker_length_meters)
-			
+
 			cv2.imwrite('{}.png'.format(file_name_pose), frame)
 
 		return camera_to_board, frame
@@ -488,7 +494,7 @@ class StereoCalibrate:
 
 
 
-	
+
 
 
 
@@ -498,7 +504,7 @@ class StereoCalibrate:
 	def FindCircleGrid(self):
 
 		"""
-		This function will discover the circle grids in camera space and then re-project the found locations back into 3d space using the calibrated camera. 
+		This function will discover the circle grids in camera space and then re-project the found locations back into 3d space using the calibrated camera.
 		"""
 
 		camera_intrinsics = parent().fetch('camera_intrinsics')
@@ -510,7 +516,7 @@ class StereoCalibrate:
 
 		frame = parent().GrabTop()
 
-		circleGridScale = (self.Circles_x, self.Circles_y) 
+		circleGridScale = (self.Circles_x, self.Circles_y)
 
 		frame = cv2.bitwise_not(frame) #invert the frame to see the dots, NOTE: do I really need to do this?
 		flags = cv2.CALIB_CB_SYMMETRIC_GRID
@@ -525,7 +531,7 @@ class StereoCalibrate:
 		params.minThreshold = 10
 		params.maxThreshold = 220
 		params.thresholdStep = 5
-		
+
 		params.filterByCircularity = True
 		params.minCircularity = 0.8
 
@@ -561,19 +567,19 @@ class StereoCalibrate:
 
 		# ray-plane intersection: circle-center to chessboard-plane
 		circles3D = intersect_circle_rays_to_board(circles, rvec, tvec, K, dist_coef)
-		 
+
 		# re-project on camera for verification
 		circles3D_reprojected, _ = cv2.projectPoints(circles3D, (0,0,0), (0,0,0), K, dist_coef)
-		
+
 		for c in circles3D_reprojected:
 			cv2.circle(frame, tuple(c.astype(np.int32)[0]), 3, (255,255,0), cv2.FILLED)
-			
+
 
 		circles3D = circles3D.astype('float32')
 		####
-		circle3DList = parent().fetch('3dCirclesFound' , []) 
+		circle3DList = parent().fetch('3dCirclesFound' , [])
 		circle2DList = parent().fetch('2dCirclesFound' , [])
-		circle3DList += [circles3D]				
+		circle3DList += [circles3D]
 		circle2DList  += [circles]
 		number_circleGrid_views = len(circle2DList)
 		parent().par.Capturedcirclesets = number_circleGrid_views
@@ -593,10 +599,10 @@ class StereoCalibrate:
 
 		for rr in range(0, len(circles3D)):
 			circle3Dat.appendRow(circles3D[rr])
-			
+
 		# for c in circles3D_reprojected:
 		#     cv2.circle(frame, tuple(c.astype(np.int32)[0]), 3, (255,255,0), cv2.FILLED)
-		
+
 		for rr in range(0, len(circles)):
 			circle2Dat.appendRow(circles[rr][0])
 
@@ -604,7 +610,7 @@ class StereoCalibrate:
 	def CalibrateProjector(self):
 
 		"""
-		this function should calibrate the projector given the known points based on the cameras calibration. Then it does a stereo calibration between the camera and the projector together. 
+		this function should calibrate the projector given the known points based on the cameras calibration. Then it does a stereo calibration between the camera and the projector together.
 		"""
 
 		print('projector calibration')
@@ -616,9 +622,9 @@ class StereoCalibrate:
 		circleDat = op('null_circle_centers')
 
 		projCirclePoints = np.zeros((circleDat.numRows, 2), np.float32)
-	
+
 		for rr in range(0,circleDat.numRows):
-			projCirclePoints[rr] = ( float(circleDat[rr,0]), float(circleDat[rr,1]) ) 
+			projCirclePoints[rr] = ( float(circleDat[rr,0]), float(circleDat[rr,1]) )
 
 		projCirclePoints  = projCirclePoints.astype('float32')
 		# objectPointsAccum = objectPointsAccum.astype('float32')
@@ -662,14 +668,14 @@ class StereoCalibrate:
 		print("proj calib mat after\n%s"%K_proj)
 		print("proj dist_coef %s"%dist_coef_proj.T)
 		print("calibration reproj err %s"%ret)
-		
+
 		cameraCirclePoints = parent().fetch('2dCirclesFound')
 		camera_intrinsics = parent().fetch('camera_intrinsics')
 		K=camera_intrinsics['K']
 		dist_coef=camera_intrinsics['dist_coeff']
 		# rvecs=camera_intrinsics['rvecs']
 		# tvecs=camera_intrinsics['tvecs']
-		 
+
 		print("stereo calibration")
 		ret, K, dist_coef, K_proj, dist_coef_proj, proj_R, proj_T, _, _ = cv2.stereoCalibrate(
 				objectPointsAccum,
@@ -683,7 +689,7 @@ class StereoCalibrate:
 				flags = cv2.CALIB_USE_INTRINSIC_GUESS
 				)
 		proj_rvec, _ = cv2.Rodrigues(proj_R)
-		 
+
 		print("R \n%s"%proj_R)
 		print("T %s"%proj_T.T)
 		print("proj calib mat after\n%s"%K_proj)
@@ -693,13 +699,13 @@ class StereoCalibrate:
 		print("reproj err %f"%ret)
 
 
-		parent().store('proj_intrinsics', {	
+		parent().store('proj_intrinsics', {
 		'ret': ret,
 		'K': K_proj,
 		'dist_coeff': dist_coef_proj,
 		'rvecs': rvecs,
 		'tvecs': tvecs
-		})	
+		})
 
 		camera_intrinsics['K'] = K
 		camera_intrinsics['dist_coeff'] = dist_coef
@@ -768,17 +774,17 @@ class StereoCalibrate:
 
 		table = matrix_comp.op('table_camera_matrices')
 
-		proj_mat = tdu.Matrix([nrl, 0, 0, 0], 
-												  [0, ntb, 0, 0], 
-												  [A, B, C, -1], 
+		proj_mat = tdu.Matrix([nrl, 0, 0, 0],
+												  [0, ntb, 0, 0],
+												  [A, B, C, -1],
 												  [0, 0, D, 0])
 
 		# Transformation matrix
-		tran_mat = tdu.Matrix([ proj_R[0][0],  proj_R[0][1],   proj_R[0][2],  proj_T[0]], 
+		tran_mat = tdu.Matrix([ proj_R[0][0],  proj_R[0][1],   proj_R[0][2],  proj_T[0]],
 							  [-proj_R[1][0], -proj_R[1][1],  -proj_R[1][2], -proj_T[1]],
 							  [-proj_R[2][0], -proj_R[2][1],  -proj_R[2][2], -proj_T[2]],
 							  [0,0,0,1])
 
 		matrix_comp.op('table_camera_matrices').clear()
-		matrix_comp.op('table_camera_matrices').appendRow(proj_mat) 
-		matrix_comp.op('table_camera_matrices').appendRow(tran_mat) 
+		matrix_comp.op('table_camera_matrices').appendRow(proj_mat)
+		matrix_comp.op('table_camera_matrices').appendRow(tran_mat)
