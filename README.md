@@ -1,4 +1,11 @@
 # TD_CameraProjectorCalibration
+## Hacking this project...
+Modifying this to just create a lens calibration tool
+
+
+---
+## Was
+
 A TouchDesigner add-on that calibrates a camera + projector pair using OpenCV. Port of https://github.com/cyrildiagne/ofxCvCameraProjectorCalibration
 
 ![Circle Grid Found](example.jpg)
